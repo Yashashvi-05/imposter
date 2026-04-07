@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Imposter — Who's the Odd One Out?</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ═══ LANDING ══════════════════════════════════════════ -->
+<div id="screen-landing" class="screen">
+  <div class="landing-wrap">
+    <div class="logo-block">
+      <span class="logo-emoji">🕵️</span>
+      <h1 class="game-title">IMPOSTER</h1>
+      <p class="tagline">One word separates you. Trust no one.</p>
+      <div class="pills">
+        <span class="pill">4–12 Players</span>
+        <span class="pill">Real-time</span>
+        <span class="pill">Mind Games</span>
+      </div>
+    </div>
+    <div class="card form-card">
+      <div class="field">
+        <label for="name-input">YOUR NAME</label>
+        <input id="name-input" type="text" placeholder="Enter your name…" maxlength="20" />
+      </div>
+      <div id="landing-error" class="error-msg hidden"></div>
+      <div class="btn-group">
+        <button id="create-btn" class="btn btn-primary">Create a Room</button>
+        <div class="or-divider">or join existing</div>
+        <div class="join-row">
+          <input id="code-input" type="text" placeholder="Room code e.g. ABC123" maxlength="6" class="code-input" />
+          <button id="join-btn" class="btn btn-secondary">Join</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ LOBBY ════════════════════════════════════════════ -->
+<div id="screen-lobby" class="screen" style="display:none">
+  <header class="lobby-header">
+    <div class="brand"><span>🕵️</span><span class="brand-name">IMPOSTER</span></div>
+    <span class="badge">LOBBY</span>
+  </header>
+  <div class="lobby-layout">
+    <aside class="lobby-left">
+      <div class="card">
+        <p class="section-label">ROOM CODE</p>
+        <div class="room-code-row">
+          <span id="room-code-display" class="room-code-big"></span>
+          <button id="copy-btn" class="btn btn-sm btn-secondary">📋 Copy</button>
+        </div>
+        <p class="hint">Share this code with your friends</p>
+      </div>
+      <div id="duration-card" class="card"></div>
+      <div class="card">
+        <p class="section-label">QUICK RULES</p>
+        <ul class="rules-list">
+          <li>🎯 Min 4 players needed</li>
+          <li>🤫 1 player gets a different word</li>
+          <li>💬 Describe your word — don't say it!</li>
+          <li>🔍 Take turns: describe then accuse</li>
+          <li>⚡ Word visible for only 4-5 seconds!</li>
+        </ul>
+      </div>
+    </aside>
+    <section class="lobby-right">
+      <!-- Leaderboard (shown after round 1+) -->
+      <div id="scoreboard-banner" class="card scoreboard" style="display:none"></div>
+      <div class="card players-card">
+        <div class="players-header">
+          <p class="section-label" style="margin:0">PLAYERS</p>
+          <span id="player-count-badge" class="badge badge-grey">0/12</span>
+        </div>
+        <div id="player-list" class="player-list"></div>
+        <div id="count-status" class="count-status waiting">⏳ Need 4 players to start</div>
+      </div>
+      <div id="lobby-error" class="error-msg hidden"></div>
+      <button id="start-btn" class="btn btn-primary btn-full btn-lg" disabled>
+        ⏳ Waiting for players (0/4)
+      </button>
+    </section>
+  </div>
+</div>
+
+<!-- ═══ WORD FLASH ════════════════════════════════════════ -->
+<div id="screen-wordflash" class="screen" style="display:none">
+  <div class="wordflash-bg">
+    <div class="wordflash-card">
+      <div id="role-badge" class="role-badge"></div>
+      <div class="word-section">
+        <p class="word-label">YOUR WORD</p>
+        <div id="flash-word" class="flash-word"></div>
+      </div>
+      <div class="countdown-wrap">
+        <svg width="72" height="72" viewBox="0 0 72 72">
+          <circle class="ring-bg" cx="36" cy="36" r="30"/>
+          <circle id="ring-fill" class="ring-fill" cx="36" cy="36" r="30"
+            stroke-dasharray="188.5" stroke-dashoffset="0"/>
+        </svg>
+        <span id="countdown-num" class="countdown-num">5</span>
+      </div>
+      <p class="memorize-hint">Memorize your word — it disappears soon!</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PLAYING ═══════════════════════════════════════════ -->
+<div id="screen-playing" class="screen" style="display:none">
+  <header class="game-header">
+    <div class="header-left">
+      <span>🕵️</span>
+      <span class="brand-name" style="font-size:.88rem">IMPOSTER</span>
+      <span id="hdr-code" class="room-pill"></span>
+    </div>
+    <div class="header-center">
+      <div class="timer-wrap">
+        <div class="timer-track"><div id="timer-fill" class="timer-fill"></div></div>
+        <span id="timer-val" class="timer-val">5:00</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div id="hdr-chances" class="chance-dots"></div>
+      <div id="hdr-me" class="hdr-me"></div>
+    </div>
+  </header>
+
+  <div id="turn-banner" class="turn-banner their-turn">
+    <span id="turn-icon" style="font-size:1.1rem">⏳</span>
+    <span id="turn-text" style="flex:1"></span>
+  </div>
+
+  <main class="game-layout">
+    <section class="chat-panel card">
+      <div class="chat-hdr">
+        <span class="section-label" style="margin:0">DESCRIPTIONS</span>
+        <span id="chat-hint" class="hint"></span>
+      </div>
+      <div id="chat-messages" class="chat-messages">
+        <div class="chat-empty">
+          <div class="chat-empty-icon">💬</div>
+          <p>Descriptions will appear here.</p>
+        </div>
+      </div>
+      <div id="chat-error" class="error-msg hidden"></div>
+      <div id="chat-input-area" class="chat-input-area"></div>
+    </section>
+
+    <section class="players-panel card">
+      <p class="section-label">PLAYERS</p>
+      <div id="game-grid" class="player-grid"></div>
+    </section>
+  </main>
+
+  <div id="guess-toast" class="guess-toast hidden"></div>
+</div>
+
+<!-- ═══ ROUND OVER ════════════════════════════════════════ -->
+<div id="screen-roundover" class="screen" style="display:none">
+  <div class="ro-content">
+    <div id="ro-header" class="ro-header"></div>
+    <div id="ro-words" class="card ro-words"></div>
+    <div id="ro-mine" class="ro-mine"></div>
+    <div id="ro-players" class="ro-players"></div>
+    <div id="ro-actions" class="ro-actions"></div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

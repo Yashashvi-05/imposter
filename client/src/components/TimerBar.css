@@ -1,0 +1,35 @@
+.timer-wrap { display: flex; flex-direction: column; gap: 4px; min-width: 130px; }
+
+.timer-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.timer-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.timer-value {
+  font-family: var(--mono);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text);
+  transition: color 0.5s;
+}
+.timer-value.urgent { color: var(--red); animation: pulse 1s ease infinite; }
+
+.timer-track {
+  height: 5px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.timer-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 1s linear, background 2s;
+}

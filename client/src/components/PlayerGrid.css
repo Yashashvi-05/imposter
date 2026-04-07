@@ -1,0 +1,170 @@
+.player-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.player-grid-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+.grid-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.grid-hint  { font-size: 0.72rem; color: var(--violet); font-style: italic; }
+.grid-status { font-size: 0.78rem; font-weight: 600; color: var(--text-2); }
+
+/* ── Grid ───────────────────────────*/
+.player-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* ── Card ───────────────────────────*/
+.player-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  border-radius: 10px;
+  text-align: center;
+  cursor: default;
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+  transition: all 0.18s ease;
+  overflow: hidden;
+}
+
+.player-card.clickable { cursor: pointer; }
+.player-card.clickable:hover {
+  border-color: var(--red);
+  background: var(--red-lt);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(220,38,38,0.1);
+}
+.player-card.clickable:active { transform: scale(0.97); }
+
+.player-card.self {
+  border-color: rgba(8,145,178,0.4);
+  background: var(--cyan-lt);
+}
+.player-card.eliminated {
+  opacity: 0.4;
+  filter: grayscale(0.5);
+}
+.player-card.guessed-correctly {
+  border-color: rgba(5,150,105,0.35);
+  background: var(--green-lt);
+}
+
+/* ── Avatar wrap ────────────────────*/
+.card-avatar-wrap { position: relative; display: inline-block; }
+.self-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid var(--cyan);
+  animation: pulse 2s ease infinite;
+}
+.correct-badge, .elim-badge {
+  position: absolute;
+  bottom: -2px; right: -2px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.6rem; font-weight: 900;
+  border: 2px solid var(--bg-card);
+}
+.correct-badge { background: var(--green); color: #fff; }
+.elim-badge    { background: var(--red);   color: #fff; }
+
+/* ── Card body ──────────────────────*/
+.card-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+}
+.card-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+  justify-content: center;
+  word-break: break-word;
+}
+.you-chip {
+  font-size: 0.63rem;
+  padding: 1px 5px;
+  background: var(--cyan-lt);
+  color: var(--cyan);
+  border-radius: 999px;
+  border: 1px solid rgba(8,145,178,0.2);
+  font-weight: 700;
+}
+.host-chip { font-size: 0.78rem; }
+
+.status-text      { font-size: 0.7rem; font-weight: 600; }
+.eliminated-text  { color: var(--red); }
+.correct-text     { color: var(--green); }
+
+.chance-dots { display: flex; gap: 4px; }
+.chance-dot  {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--violet);
+  transition: background 0.2s;
+}
+.chance-dot.used { background: var(--border); }
+
+/* ── Confirm overlay ────────────────*/
+.confirm-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.96);
+  border-radius: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  z-index: 2;
+}
+.confirm-text {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text);
+  line-height: 1.4;
+  margin: 0;
+}
+.confirm-actions { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+
+/* ── Imposter hint ──────────────────*/
+.imposter-hint-bar {
+  padding: 8px 12px;
+  background: var(--red-lt);
+  border: 1px solid rgba(220,38,38,0.2);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  color: var(--red);
+  text-align: center;
+  flex-shrink: 0;
+}
