@@ -24,8 +24,8 @@ A real-time multiplayer party game where one player gets a secretly different wo
 ### Run Locally
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/imposter-game.git
-cd imposter-game/server
+git clone https://github.com/Yashashvi-05/imposter.git
+cd imposter/server
 npm install
 node index.js
 ```
