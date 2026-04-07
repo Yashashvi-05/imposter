@@ -11,8 +11,9 @@ const S = {
   myWord: null, myRole: null, messages: [],
   currentTurnSocketId: null, currentTurnName: null,
   confirming: null,
-  scores: {},          // { socketId: totalScore } — persists across rounds
-  roundsPlayed: 0,     // how many rounds have finished
+  scores: {},
+  roundsPlayed: 0,
+  minPlayers: 4,
 };
 
 // ── Helpers ────────────────────────────────────────
@@ -98,6 +99,22 @@ function renderLobby() {
     setTimeout(() => $('copy-btn').textContent = '📋 Copy', 2000);
   };
   $('start-btn').onclick = () => socket.emit('start-game', { roomId: S.roomId });
+
+  // Host-only controls
+  const hc = $('host-controls');
+  if (hc) hc.style.display = S.isHost ? '' : 'none';
+  if (S.isHost) {
+    $('set-word-btn').onclick = () => {
+      const crew = $('crew-word-input').value.trim();
+      const imp  = $('imp-word-input').value.trim();
+      if (!crew || !imp) { showErr('lobby-error', 'Enter both crew and imposter words.'); return; }
+      socket.emit('set-custom-word', { roomId: S.roomId, crewWord: crew, imposterWord: imp });
+    };
+    const rsBtn = $('reset-scores-btn');
+    const hasScores = Object.values(S.scores).some(s => s > 0);
+    if (rsBtn) rsBtn.style.display = hasScores ? '' : 'none';
+  }
+
   updateStartBtn();
 }
 
@@ -181,10 +198,21 @@ function renderLobbyPlayers() {
 }
 
 function updateStartBtn() {
-  const ok = S.players.length >= 4;
+  const ok = S.players.length >= S.minPlayers;
   $('start-btn').disabled = !ok || !S.isHost;
-  $('start-btn').textContent = ok ? '🚀 Start Game' : `⏳ Waiting (${S.players.length}/4)`;
+  $('start-btn').textContent = ok ? '🚀 Start Game'
+    : `⏳ Waiting (${S.players.length}/${S.minPlayers})`;
 }
+
+// Host control window functions
+window.toggleTestMode = function(on) {
+  const min = on ? 2 : 4;
+  socket.emit('set-min-players', { roomId: S.roomId, min });
+};
+window.doResetScores = function() {
+  if (!confirm('Reset all scores to 0?')) return;
+  socket.emit('reset-scores', { roomId: S.roomId });
+};
 
 // ══════════════════════════════════════════════════
 // WORD FLASH — same neutral style for everyone
@@ -262,14 +290,19 @@ function renderTurnBanner() {
   }
 }
 
-// Chat — only current turn player can type
+// Chat — only current turn player can type; eliminated = spectator view
 function renderChatInput() {
   const isMyTurn = S.currentTurnSocketId === S.mySocketId;
   const p = me();
   const area = $('chat-input-area');
 
   if (p?.isEliminated) {
-    area.innerHTML = '<div class="chat-locked red">💀 You are eliminated.</div>';
+    // Spectator mode: show their word so they can watch meaningfully
+    area.innerHTML = `
+      <div class="chat-locked red">
+        💀 You are eliminated — watching as spectator
+        ${S.myWord ? `<span style="font-size:.75rem;display:block;margin-top:4px;opacity:.8">Your word was: <strong>${esc(S.myWord)}</strong></span>` : ''}
+      </div>`;
     return;
   }
   if (!isMyTurn) {
@@ -558,10 +591,37 @@ socket.on('guess-result', result => {
 socket.on('round-over', renderRoundOver);
 
 socket.on('rematch-started', ({players, host, roundDuration}) => {
-  S.roundDuration = roundDuration; S.isHost = host === S.mySocketId;
+  S.roundDuration = roundDuration;
+  S.isHost = host === S.mySocketId;
   setPlayers(players, host);
   S.messages = []; S.myWord = null; S.myRole = null; S.currentTurnSocketId = null;
   showScreen('lobby'); renderLobby();
+});
+
+// ── New feature socket events ──────────────────────────────────────────────
+socket.on('scores-reset', ({ players }) => {
+  S.scores = {};
+  S.roundsPlayed = 0;
+  setPlayers(players, null);
+  renderLobbyPlayers();
+  renderLobby();
+  showErr('lobby-error', '✅ Scores reset!', 3000);
+});
+
+socket.on('custom-word-set', ({ crewWord, imposterWord }) => {
+  const status = $('custom-word-status');
+  if (status) {
+    status.style.display = 'block';
+    status.textContent = `✅ Next round: "${crewWord}" vs "${imposterWord}"`;
+  }
+  // clear inputs
+  if ($('crew-word-input')) $('crew-word-input').value = '';
+  if ($('imp-word-input'))  $('imp-word-input').value  = '';
+});
+
+socket.on('min-players-updated', ({ minPlayers }) => {
+  S.minPlayers = minPlayers;
+  updateStartBtn();
 });
 
 // ── Boot ─────────────────────────────────────────

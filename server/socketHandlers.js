@@ -152,6 +152,33 @@ function registerHandlers(io, socket) {
     });
   });
 
+  // ─── Reset Scores (host only) ─────────────────────────────────────────────────
+  socket.on('reset-scores', ({ roomId }) => {
+    const room = gm.getRoom(roomId);
+    if (!room || room.host !== socket.id || room.phase !== 'lobby') return;
+    const updated = gm.resetScores(roomId);
+    if (!updated) return;
+    io.to(roomId).emit('scores-reset', { players: gm.getPublicPlayerList(updated) });
+  });
+
+  // ─── Set Custom Word Pair (host only) ─────────────────────────────────────────
+  socket.on('set-custom-word', ({ roomId, crewWord, imposterWord }) => {
+    const room = gm.getRoom(roomId);
+    if (!room || room.host !== socket.id || room.phase !== 'lobby') return;
+    if (!crewWord || !imposterWord) return;
+    gm.setCustomWord(roomId, crewWord, imposterWord);
+    socket.emit('custom-word-set', { crewWord: crewWord.trim(), imposterWord: imposterWord.trim() });
+  });
+
+  // ─── Set Min Players (host only) ──────────────────────────────────────────────
+  socket.on('set-min-players', ({ roomId, min }) => {
+    const room = gm.getRoom(roomId);
+    if (!room || room.host !== socket.id || room.phase !== 'lobby') return;
+    gm.setMinPlayers(roomId, min);
+    const updated = gm.getRoom(roomId);
+    io.to(roomId).emit('min-players-updated', { minPlayers: updated.minPlayers });
+  });
+
   // ─── Disconnect ───────────────────────────────────────────────────────────────
   socket.on('disconnect', () => {
     const result = gm.removePlayer(socket.id);

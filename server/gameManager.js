@@ -1,4 +1,4 @@
-const { WORD_PAIRS } = require('./words');
+const { getRandomPair } = require('./words');
 
 // In-memory room storage: roomId → GameState
 const rooms = new Map();
@@ -114,9 +114,11 @@ function createRoom(hostSocketId, hostName, hostAvatar) {
     crewWord: null,
     imposterWord: null,
     currentWordPair: null,
+    customWordPair: null,      // { crew, imposter } set by host, or null for random
+    minPlayers: 4,             // host can lower for testing
     messages: [],
     wordFlashTimeout: null,
-    currentTurnSocketId: null,  // whose turn it is to guess
+    currentTurnSocketId: null,
   };
 
   rooms.set(roomId, gameState);
@@ -175,13 +177,14 @@ function getRoom(roomId) {
 function startGame(roomId) {
   const room = rooms.get(roomId);
   if (!room) return { error: 'Room not found.' };
-  if (room.players.size < 4) return { error: 'Need at least 4 players to start.' };
+  if (room.players.size < room.minPlayers) return { error: `Need at least ${room.minPlayers} players to start.` };
   if (room.phase !== 'lobby' && room.phase !== 'round-over') return { error: 'Game has already started.' };
 
-  const wordPair = WORD_PAIRS[Math.floor(Math.random() * WORD_PAIRS.length)];
+  const wordPair = getRandomPair(room.customWordPair);
   room.crewWord = wordPair.crew;
   room.imposterWord = wordPair.imposter;
   room.currentWordPair = wordPair;
+  room.customWordPair = null; // reset after use — next round is random unless host sets again
 
   const playerIds = Array.from(room.players.keys());
   room.imposterSocketId = playerIds[Math.floor(Math.random() * playerIds.length)];
@@ -376,6 +379,31 @@ function resetRoom(roomId) {
   return room;
 }
 
+// ─── New Utility Functions ─────────────────────────────────────────────────────
+
+function resetScores(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return null;
+  for (const player of room.players.values()) {
+    player.score = 0;
+  }
+  return room;
+}
+
+function setCustomWord(roomId, crewWord, imposterWord) {
+  const room = rooms.get(roomId);
+  if (!room) return null;
+  room.customWordPair = { crew: crewWord.trim(), imposter: imposterWord.trim() };
+  return room;
+}
+
+function setMinPlayers(roomId, min) {
+  const room = rooms.get(roomId);
+  if (!room) return null;
+  room.minPlayers = Math.max(2, Math.min(12, min));
+  return room;
+}
+
 module.exports = {
   createRoom,
   joinRoom,
@@ -386,6 +414,9 @@ module.exports = {
   processGuess,
   endRound,
   resetRoom,
+  resetScores,
+  setCustomWord,
+  setMinPlayers,
   getPublicPlayerList,
   generateMessageId,
   advanceTurn,

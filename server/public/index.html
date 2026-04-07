@@ -56,6 +56,39 @@
         <p class="hint">Share this code with your friends</p>
       </div>
       <div id="duration-card" class="card"></div>
+      <!-- Host-only controls -->
+      <div id="host-controls" class="card" style="display:none">
+        <p class="section-label">HOST CONTROLS</p>
+        <!-- Custom word pair -->
+        <div class="field" style="margin-bottom:8px">
+          <label style="font-size:.7rem;color:var(--muted);font-weight:600">CUSTOM WORD PAIR (optional)</label>
+          <div class="join-row" style="margin-top:4px">
+            <input id="crew-word-input" type="text" placeholder="Crew word" maxlength="20"
+              style="flex:1;font-size:.82rem;padding:6px 10px" />
+            <span style="padding:0 6px;color:var(--muted);line-height:2.2">vs</span>
+            <input id="imp-word-input" type="text" placeholder="Imposter word" maxlength="20"
+              style="flex:1;font-size:.82rem;padding:6px 10px" />
+          </div>
+          <button id="set-word-btn" class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%">
+            Set Custom Words
+          </button>
+          <div id="custom-word-status" style="font-size:.72rem;color:var(--violet);margin-top:4px;display:none"></div>
+        </div>
+        <!-- Min players (test mode) -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">
+          <div>
+            <div style="font-size:.78rem;font-weight:600">🧪 Test Mode</div>
+            <div style="font-size:.68rem;color:var(--muted)">Allow starting with 2 players</div>
+          </div>
+          <label class="toggle-switch">
+            <input id="test-mode-toggle" type="checkbox" onchange="toggleTestMode(this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <!-- Reset Scores -->
+        <button id="reset-scores-btn" class="btn btn-outline btn-sm" style="margin-top:12px;width:100%"
+          onclick="doResetScores()">🔄 Reset All Scores</button>
+      </div>
       <div class="card">
         <p class="section-label">QUICK RULES</p>
         <ul class="rules-list">
