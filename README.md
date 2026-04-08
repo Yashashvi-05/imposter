@@ -8,11 +8,11 @@ A real-time multiplayer party game where one player gets a secretly different wo
 
 ## 📸 How It Works
 
-- Everyone joins the same room on their phone/laptop
-- Each player sees a word for 5 seconds — **one player (the Imposter) gets a different word**
-- Players take turns describing their word without saying it
-- After describing, **any player can accuse someone** they think is the Imposter
-- Find the Imposter → earn points. Imposter fools everyone → they score!
+- Everyone joins the same room on phone/laptop
+- Each player sees a secret word for **4-5 seconds** (no role label shown)
+- One player gets the odd word (Imposter) and does not know they are imposter
+- Players describe in turn order with a **45-second turn timer**
+- Any active player can accuse via player grid (mobile has a dedicated `Accuse` button)
 
 ---
 
@@ -34,35 +34,37 @@ The server starts on **port 3001**.
 
 ### Play on Local Network (Same WiFi)
 
-1. Find your machine's local IP (e.g. `192.168.0.x`)
-2. Everyone on the same WiFi opens: `http://192.168.0.x:3001`
-3. One person creates a room, others join with the room code
+1. Start the server and open it on your laptop browser
+2. In lobby, share the generated **join link** or **QR code**
+3. Others on the same WiFi can join directly from mobile
 
 ---
 
 ## 🎮 Game Flow
 
 ```
-Landing → Lobby → Word Flash (5s) → Playing → Round Over → Lobby ...
+Landing → Lobby → Word Flash (4-5s) → Playing → Round Over → Lobby ...
 ```
 
 | Phase | What happens |
 |---|---|
-| **Lobby** | Host creates room, others join. Host sets round duration (3/5/8 min) |
-| **Word Flash** | Your secret word appears for ~5 seconds. Memorize it! |
-| **Playing** | Take turns describing your word. After you describe, the next person goes |
-| **Accusing** | Any active player can accuse someone at any time by clicking their card |
-| **Round Over** | Words revealed, scores updated, host can start another round |
+| **Lobby** | Host creates room, others join. Host sets duration (3/5/8 min) and can share URL/QR |
+| **Word Flash** | Secret word appears for random 4-5 seconds, then hides |
+| **Playing** | Turn-based describing with 45s turn timeout auto-skip |
+| **Accusing** | Any active player can accuse (1 chance each). Wrong guess eliminates active play |
+| **Round Over** | Words/results shown, latest-round + total scores updated |
 
 ---
 
 ## 📏 Rules
 
-- **Minimum 4 players** required to start
-- The **Imposter gets a slightly different word** (e.g. everyone has "Coffee", imposter has "Tea")
+- **Minimum 4 players** required to start (host test mode can lower min for testing)
+- The imposter word is now drawn from a **different category** than the crew word
 - When describing: **don't say the actual word** — give hints
-- You have **2 chances** (4 players) or **3 chances** (5+ players) to accuse correctly
-- **Self-accuse allowed** — if you're the Imposter, you can click yourself to reveal and score bonus points
+- Every player has **1 accuse chance** per round
+- Wrong guess => eliminated from active play, but still remains in room as spectator/chat
+- **Self-accuse allowed** — if you're the imposter, you can click yourself to reveal and score bonus points
+- Round ends immediately if all crewmates correctly find the imposter
 
 ---
 
@@ -75,7 +77,10 @@ Landing → Lobby → Word Flash (5s) → Playing → Round Over → Lobby ...
 | Imposter survived the round | +2 pts |
 | Missed / Eliminated | +0 pts |
 
-Scores carry across rounds in the same session. A leaderboard appears in the lobby after round 1.
+Scores carry across rounds in the same session.
+
+- **Leaderboard**: cumulative points across rounds
+- **Latest Game Score**: points earned in the most recent round
 
 ---
 
@@ -127,17 +132,23 @@ You can edit `server/words.js` to add your own word pairs:
 
 | Event | Direction | Description |
 |---|---|---|
-| `create-room` | Client → Server | Create a new game room |
-| `join-room` | Client → Server | Join an existing room |
-| `start-game` | Client → Server | Host starts the round |
-| `send-message` | Client → Server | Send your description (auto-advances turn) |
-| `submit-guess` | Client → Server | Accuse a player |
-| `request-rematch` | Client → Server | Host starts a new round |
-| `turn-changed` | Server → All | Notify who describes next |
-| `new-message` | Server → All | Broadcast a description |
-| `guess-result` | Server → Guesser | Private result of accusation |
-| `players-updated` | Server → All | Updated player states |
-| `round-over` | Server → All | Round results |
+| `create-room` | Client → Server | Create a game room |
+| `join-room` | Client → Server | Join room (mid-game joins as spectator) |
+| `reconnect-room` | Client → Server | Restore player session after disconnect |
+| `leave-room` | Client → Server | Voluntarily leave room immediately |
+| `start-game` | Client → Server | Host starts round |
+| `send-message` | Client → Server | Send turn-based description |
+| `send-personal-chat` | Client → Server | Send group chat message (all players) |
+| `submit-guess` | Client → Server | Accuse selected player |
+| `request-rematch` | Client → Server | Host resets to lobby for next round |
+| `turn-changed` | Server → All | Next describing player |
+| `turn-tick` | Server → All | Per-turn countdown updates |
+| `turn-timed-out` | Server → All | Current turn auto-skipped |
+| `new-message` | Server → All | Description feed message |
+| `new-personal-chat` | Server → All | Group chat message |
+| `guess-result` | Server → Guesser | Private accuse result |
+| `players-updated` | Server → All | Player state sync |
+| `round-over` | Server → All | Round results payload |
 
 ---
 
@@ -145,10 +156,10 @@ You can edit `server/words.js` to add your own word pairs:
 
 Fully responsive — works on phones, tablets, and desktops.
 
-- Stacked layout on mobile (chat above player grid)
-- 3-column player grid on small screens
-- Compact game header hides non-essential labels
-- Touch-friendly card buttons
+- Join via lobby URL/QR sharing
+- Mobile `Accuse` button opens player selection modal
+- Group chat modal available to active/eliminated/spectator users
+- Reconnect status shown when a player temporarily disconnects
 
 ---
 
