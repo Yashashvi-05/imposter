@@ -26,6 +26,21 @@
         <label for="name-input">YOUR NAME</label>
         <input id="name-input" type="text" placeholder="Enter your name…" maxlength="20" />
       </div>
+      <div class="field">
+        <label for="avatar-input">AVATAR</label>
+        <select id="avatar-input">
+          <option value="🦊">🦊 Fox</option>
+          <option value="🐼">🐼 Panda</option>
+          <option value="🐸">🐸 Frog</option>
+          <option value="🦄">🦄 Unicorn</option>
+          <option value="🐯">🐯 Tiger</option>
+          <option value="🐵">🐵 Monkey</option>
+          <option value="🐧">🐧 Penguin</option>
+          <option value="🐙">🐙 Octopus</option>
+          <option value="🐺">🐺 Wolf</option>
+          <option value="🐻">🐻 Bear</option>
+        </select>
+      </div>
       <div id="landing-error" class="error-msg hidden"></div>
       <div class="btn-group">
         <button id="create-btn" class="btn btn-primary">Create a Room</button>
@@ -43,7 +58,10 @@
 <div id="screen-lobby" class="screen" style="display:none">
   <header class="lobby-header">
     <div class="brand"><span>🕵️</span><span class="brand-name">IMPOSTER</span></div>
-    <span class="badge">LOBBY</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="badge">LOBBY</span>
+      <button id="leave-lobby-btn" class="btn btn-sm btn-secondary">Leave</button>
+    </div>
   </header>
   <div class="lobby-layout">
     <aside class="lobby-left">
@@ -54,6 +72,11 @@
           <button id="copy-btn" class="btn btn-sm btn-secondary">📋 Copy</button>
         </div>
         <p class="hint">Share this code with your friends</p>
+        <div class="invite-wrap">
+          <input id="invite-link" type="text" readonly />
+          <button id="copy-link-btn" class="btn btn-sm btn-secondary">Copy Link</button>
+          <img id="invite-qr" alt="Join room QR code" />
+        </div>
       </div>
       <div id="duration-card" class="card"></div>
       <!-- Host-only controls -->
@@ -95,6 +118,7 @@
           <li>🎯 Min 4 players needed</li>
           <li>🤫 1 player gets a different word</li>
           <li>💬 Describe your word — don't say it!</li>
+          <li>🎲 1 guess chance per player</li>
           <li>🔍 Take turns: describe then accuse</li>
           <li>⚡ Word visible for only 4-5 seconds!</li>
         </ul>
@@ -103,6 +127,7 @@
     <section class="lobby-right">
       <!-- Leaderboard (shown after round 1+) -->
       <div id="scoreboard-banner" class="card scoreboard" style="display:none"></div>
+      <div id="latest-round-board" class="card scoreboard" style="display:none"></div>
       <div class="card players-card">
         <div class="players-header">
           <p class="section-label" style="margin:0">PLAYERS</p>
@@ -158,12 +183,16 @@
     <div class="header-right">
       <div id="hdr-chances" class="chance-dots"></div>
       <div id="hdr-me" class="hdr-me"></div>
+      <button id="accuse-btn" class="btn btn-sm btn-danger">Accuse</button>
+      <button id="group-chat-btn" class="btn btn-sm btn-outline">Chat</button>
+      <button id="leave-game-btn" class="btn btn-sm btn-secondary">Leave</button>
     </div>
   </header>
 
   <div id="turn-banner" class="turn-banner their-turn">
     <span id="turn-icon" style="font-size:1.1rem">⏳</span>
     <span id="turn-text" style="flex:1"></span>
+    <span id="turn-time-pill" class="badge badge-grey">45s</span>
   </div>
 
   <main class="game-layout">
@@ -189,6 +218,30 @@
   </main>
 
   <div id="guess-toast" class="guess-toast hidden"></div>
+</div>
+
+<div id="accuse-modal" class="accuse-modal" style="display:none">
+  <div class="accuse-modal-card card">
+    <div class="accuse-modal-head">
+      <strong>Choose Player</strong>
+      <button id="close-accuse-btn" class="btn btn-sm btn-secondary">Close</button>
+    </div>
+    <div id="accuse-grid" class="player-grid"></div>
+  </div>
+</div>
+
+<div id="group-chat-modal" class="accuse-modal" style="display:none">
+  <div class="accuse-modal-card card">
+    <div class="accuse-modal-head">
+      <strong>Group Chat</strong>
+      <button id="close-group-chat-btn" class="btn btn-sm btn-secondary">Close</button>
+    </div>
+    <div id="personal-chat-messages" class="chat-messages" style="max-height:280px"></div>
+    <div class="chat-input-area">
+      <textarea id="personal-chat-input" class="chat-input" rows="2" maxlength="250" placeholder="Message everyone..."></textarea>
+      <button id="send-personal-chat-btn" class="btn btn-primary btn-sm">Send</button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ ROUND OVER ════════════════════════════════════════ -->

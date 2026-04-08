@@ -1,25 +1,90 @@
 const gm = require('./gameManager');
 const { validateMessage } = require('./validation');
+const os = require('os');
+
+const DISCONNECT_GRACE_MS = 60000;
+const disconnectTimers = new Map();
+
+function getLanBaseUrl() {
+  const nets = os.networkInterfaces();
+  const entries = [];
+  const blockedName = /(virtual|vmware|hyper-v|vEthernet|loopback|tailscale|zerotier|docker)/i;
+  const preferredName = /(wi-?fi|wlan|wireless|ethernet)/i;
+
+  function isPrivateIPv4(ip) {
+    if (!ip) return false;
+    if (ip.startsWith('10.')) return true;
+    if (ip.startsWith('192.168.')) return true;
+    const m = ip.match(/^172\.(\d+)\./);
+    if (m) {
+      const second = Number(m[1]);
+      return second >= 16 && second <= 31;
+    }
+    return false;
+  }
+
+  for (const [ifaceName, list] of Object.entries(nets)) {
+    for (const net of list || []) {
+      if (net.family !== 'IPv4' || net.internal) continue;
+      if (!isPrivateIPv4(net.address)) continue;
+      if (net.address.startsWith('169.254.')) continue;
+      if (blockedName.test(ifaceName)) continue;
+
+      let score = 0;
+      if (net.address.startsWith('192.168.')) score += 4;
+      if (net.address.startsWith('10.')) score += 3;
+      if (/^172\.(1[6-9]|2\d|3[01])\./.test(net.address)) score += 2;
+      if (preferredName.test(ifaceName)) score += 5;
+
+      entries.push({ ifaceName, address: net.address, score });
+    }
+  }
+
+  entries.sort((a, b) => b.score - a.score);
+  if (entries.length > 0) {
+    const port = process.env.PORT || 3001;
+    return `http://${entries[0].address}:${port}`;
+  }
+
+  // Last-resort fallback: any external IPv4
+  for (const list of Object.values(nets)) {
+    for (const net of list || []) {
+      if (net.family === 'IPv4' && !net.internal) {
+        const port = process.env.PORT || 3001;
+        return `http://${net.address}:${port}`;
+      }
+    }
+  }
+  return null;
+}
 
 function registerHandlers(io, socket) {
 
   // ─── Create Room ─────────────────────────────────────────────────────────────
-  socket.on('create-room', ({ name, avatar }) => {
-    if (!name || !avatar) return;
-    const { roomId, room } = gm.createRoom(socket.id, name, avatar);
+  socket.on('create-room', ({ name, avatar, sessionId }) => {
+    if (!name || !avatar) {
+      socket.emit('join-error', { message: 'Name and avatar are required.' });
+      return;
+    }
+    const { roomId, room } = gm.createRoom(socket.id, name, avatar, sessionId);
     socket.join(roomId);
     socket.emit('room-created', {
       roomId,
       players: gm.getPublicPlayerList(room),
       host: room.host,
       roundDuration: room.roundDuration,
+      sessionId,
+      inviteBaseUrl: getLanBaseUrl(),
     });
   });
 
   // ─── Join Room ────────────────────────────────────────────────────────────────
-  socket.on('join-room', ({ roomId, name, avatar }) => {
-    if (!roomId || !name || !avatar) return;
-    const result = gm.joinRoom(roomId.toUpperCase(), socket.id, name, avatar);
+  socket.on('join-room', ({ roomId, name, avatar, sessionId }) => {
+    if (!roomId || !name || !avatar) {
+      socket.emit('join-error', { message: 'Room code, name and avatar are required.' });
+      return;
+    }
+    const result = gm.joinRoom(roomId.toUpperCase(), socket.id, name, avatar, sessionId);
     if (result.error) { socket.emit('join-error', { message: result.error }); return; }
 
     socket.join(roomId.toUpperCase());
@@ -31,11 +96,54 @@ function registerHandlers(io, socket) {
       players: publicPlayers,
       host: room.host,
       roundDuration: room.roundDuration,
+      sessionId,
+      inviteBaseUrl: getLanBaseUrl(),
+      phase: room.phase,
+      timeRemaining: room.timeRemaining,
+      currentTurnSocketId: room.currentTurnSocketId,
+      currentTurnName: room.players.get(room.currentTurnSocketId)?.name,
+      turnTimeRemaining: room.turnTimeRemaining,
+      turnDuration: room.turnDuration,
+      messages: room.messages,
+      personalMessages: room.personalMessages,
     });
     socket.to(roomId.toUpperCase()).emit('player-joined', {
       players: publicPlayers,
       newPlayer: { socketId: socket.id, name, avatar },
     });
+  });
+
+  socket.on('reconnect-room', ({ sessionId, roomId }) => {
+    if (!sessionId) return;
+    const result = gm.reconnectPlayer(sessionId, socket.id);
+    if (result?.error) return;
+
+    const { room, roomId: resolvedRoomId, player } = result;
+    const finalRoomId = roomId || resolvedRoomId;
+    socket.join(finalRoomId);
+    const pendingTimeout = disconnectTimers.get(sessionId);
+    if (pendingTimeout) clearTimeout(pendingTimeout);
+    disconnectTimers.delete(sessionId);
+
+    socket.emit('reconnected', {
+      roomId: finalRoomId,
+      players: gm.getPublicPlayerList(room),
+      host: room.host,
+      roundDuration: room.roundDuration,
+      inviteBaseUrl: getLanBaseUrl(),
+      phase: room.phase,
+      timeRemaining: room.timeRemaining,
+      currentTurnSocketId: room.currentTurnSocketId,
+      currentTurnName: room.players.get(room.currentTurnSocketId)?.name,
+      turnTimeRemaining: room.turnTimeRemaining,
+      turnDuration: room.turnDuration,
+      word: player.word,
+      role: player.role,
+      messages: room.messages,
+      personalMessages: room.personalMessages,
+    });
+
+    io.to(finalRoomId).emit('players-updated', { players: gm.getPublicPlayerList(room) });
   });
 
   // ─── Set Round Duration (host only) ──────────────────────────────────────────
@@ -128,7 +236,34 @@ function registerHandlers(io, socket) {
         currentTurnSocketId: nextTurnId,
         currentTurnName: room.players.get(nextTurnId)?.name,
       });
+      gm.startTurnTimer(roomId, io);
     }
+  });
+
+  // ─── Group Chat (anyone in room, including eliminated/spectators) ───────────
+  socket.on('send-personal-chat', ({ roomId, text }) => {
+    const room = gm.getRoom(roomId);
+    if (!room) return;
+    const player = room.players.get(socket.id);
+    if (!player) return;
+    const trimmed = (text || '').trim();
+    if (!trimmed) return;
+    if (trimmed.length > 250) {
+      socket.emit('message-rejected', { reason: 'Group chat message too long (max 250 chars).' });
+      return;
+    }
+
+    const msg = {
+      id: gm.generateMessageId(),
+      senderSocketId: socket.id,
+      senderName: player.name,
+      senderAvatar: player.avatar,
+      text: trimmed,
+      timestamp: Date.now(),
+    };
+    room.personalMessages.push(msg);
+    if (room.personalMessages.length > 200) room.personalMessages.shift();
+    io.to(roomId).emit('new-personal-chat', msg);
   });
 
   // ─── Submit Guess (accuse) ────────────────────────────────────────────────────
@@ -150,6 +285,44 @@ function registerHandlers(io, socket) {
       host: resetRoom.host,
       roundDuration: resetRoom.roundDuration,
     });
+  });
+
+  socket.on('leave-room', ({ roomId }) => {
+    if (!roomId) return;
+    const room = gm.getRoom(roomId);
+    if (!room) return;
+
+    // Voluntary leave should remove immediately (no grace timer).
+    const player = room.players.get(socket.id);
+    if (player?.sessionId) {
+      const t = disconnectTimers.get(player.sessionId);
+      if (t) clearTimeout(t);
+      disconnectTimers.delete(player.sessionId);
+    }
+
+    const result = gm.removePlayer(socket.id);
+    if (!result || result.deleted) return;
+    const updatedRoom = gm.getRoom(result.roomId);
+    if (!updatedRoom) return;
+
+    socket.leave(result.roomId);
+    io.to(result.roomId).emit('player-left', {
+      socketId: socket.id,
+      players: gm.getPublicPlayerList(updatedRoom),
+      newHost: result.newHost,
+    });
+
+    if (updatedRoom.phase === 'playing' && updatedRoom.currentTurnSocketId) {
+      io.to(result.roomId).emit('turn-changed', {
+        currentTurnSocketId: updatedRoom.currentTurnSocketId,
+        currentTurnName: updatedRoom.players.get(updatedRoom.currentTurnSocketId)?.name,
+      });
+      gm.startTurnTimer(result.roomId, io);
+    }
+
+    if (result.wasImposter && updatedRoom.phase === 'playing') {
+      gm.endRound(result.roomId, io, 'imposter-disconnected');
+    }
   });
 
   // ─── Reset Scores (host only) ─────────────────────────────────────────────────
@@ -181,29 +354,55 @@ function registerHandlers(io, socket) {
 
   // ─── Disconnect ───────────────────────────────────────────────────────────────
   socket.on('disconnect', () => {
-    const result = gm.removePlayer(socket.id);
-    if (!result) return;
-    if (result.deleted) return;
-    const room = gm.getRoom(result.roomId);
-    if (!room) return;
+    const found = gm.findRoomBySocketId(socket.id);
+    if (!found) return;
+    const { roomId, room } = found;
+    const player = room.players.get(socket.id);
+    if (!player) return;
 
-    io.to(result.roomId).emit('player-left', {
-      socketId: socket.id,
-      players: gm.getPublicPlayerList(room),
-      newHost: result.newHost,
-    });
+    player.disconnected = true;
+    io.to(roomId).emit('players-updated', { players: gm.getPublicPlayerList(room) });
 
-    // Broadcast the new turn if it changed due to disconnect
-    if (room.phase === 'playing' && room.currentTurnSocketId) {
-      io.to(result.roomId).emit('turn-changed', {
-        currentTurnSocketId: room.currentTurnSocketId,
-        currentTurnName: room.players.get(room.currentTurnSocketId)?.name,
+    if (room.phase === 'playing' && room.currentTurnSocketId === socket.id) {
+      const nextTurnId = gm.advanceTurn(room);
+      io.to(roomId).emit('turn-changed', {
+        currentTurnSocketId: nextTurnId,
+        currentTurnName: room.players.get(nextTurnId)?.name,
       });
+      gm.startTurnTimer(roomId, io);
     }
 
-    if (result.wasImposter && room.phase === 'playing') {
-      gm.endRound(result.roomId, io, 'imposter-disconnected');
-    }
+    if (!player.sessionId) return;
+    const existingTimer = disconnectTimers.get(player.sessionId);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timeout = setTimeout(() => {
+      disconnectTimers.delete(player.sessionId);
+      const result = gm.removePlayer(socket.id);
+      if (!result || result.deleted) return;
+      const updatedRoom = gm.getRoom(result.roomId);
+      if (!updatedRoom) return;
+
+      io.to(result.roomId).emit('player-left', {
+        socketId: socket.id,
+        players: gm.getPublicPlayerList(updatedRoom),
+        newHost: result.newHost,
+      });
+
+      if (updatedRoom.phase === 'playing' && updatedRoom.currentTurnSocketId) {
+        io.to(result.roomId).emit('turn-changed', {
+          currentTurnSocketId: updatedRoom.currentTurnSocketId,
+          currentTurnName: updatedRoom.players.get(updatedRoom.currentTurnSocketId)?.name,
+        });
+        gm.startTurnTimer(result.roomId, io);
+      }
+
+      if (result.wasImposter && updatedRoom.phase === 'playing') {
+        gm.endRound(result.roomId, io, 'imposter-disconnected');
+      }
+    }, DISCONNECT_GRACE_MS);
+
+    disconnectTimers.set(player.sessionId, timeout);
   });
 }
 

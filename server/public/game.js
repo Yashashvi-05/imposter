@@ -7,11 +7,16 @@ const COLORS = [
 
 const S = {
   mySocketId: null, myName: '', roomId: null, isHost: false,
+  myAvatar: '🦊', sessionId: null,
+  inviteBaseUrl: '',
   players: [], roundDuration: 300, timeRemaining: 300,
   myWord: null, myRole: null, messages: [],
   currentTurnSocketId: null, currentTurnName: null,
+  turnDuration: 45, turnTimeRemaining: 45,
   confirming: null,
   scores: {},
+  latestRoundScores: {},
+  personalMessages: [],
   roundsPlayed: 0,
   minPlayers: 4,
 };
@@ -21,6 +26,20 @@ const $ = id => document.getElementById(id);
 const colorFor = i => COLORS[i % COLORS.length];
 const me = () => S.players.find(p => p.socketId === S.mySocketId);
 const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function getOrCreateSessionId() {
+  const existing = localStorage.getItem('imposter.sessionId');
+  if (existing) return existing;
+
+  let sid = null;
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    sid = window.crypto.randomUUID();
+  } else {
+    sid = `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+  localStorage.setItem('imposter.sessionId', sid);
+  return sid;
+}
 
 function showScreen(name) {
   ['landing','lobby','wordflash','playing','roundover'].forEach(n => {
@@ -33,12 +52,13 @@ function fmt(secs) {
   return `${Math.floor(secs/60)}:${String(secs%60).padStart(2,'0')}`;
 }
 
-function av(color, initial, size) {
+function av(color, avatar, fallbackInitial, size) {
   const s = size === 'sm' ? 'width:30px;height:30px;font-size:.78rem'
           : size === 'lg' ? 'width:50px;height:50px;font-size:1.2rem'
           : 'width:40px;height:40px;font-size:1rem';
+  const label = avatar && avatar !== 'auto' ? avatar : fallbackInitial;
   return `<div style="${s};background:${color};border-radius:50%;display:inline-flex;
-    align-items:center;justify-content:center;font-weight:900;color:#fff;flex-shrink:0">${initial}</div>`;
+    align-items:center;justify-content:center;font-weight:900;color:#fff;flex-shrink:0">${label}</div>`;
 }
 
 function showErr(id, msg, ms = 4000) {
@@ -62,25 +82,50 @@ function fallCopy(t) {
 
 // ── Socket ─────────────────────────────────────────
 const socket = io();
-socket.on('connect', () => { S.mySocketId = socket.id; });
+socket.on('connect', () => {
+  S.mySocketId = socket.id;
+  const storedSessionId = localStorage.getItem('imposter.sessionId');
+  const storedRoomId = localStorage.getItem('imposter.roomId');
+  if (storedSessionId && storedRoomId) {
+    S.sessionId = storedSessionId;
+    socket.emit('reconnect-room', { sessionId: storedSessionId, roomId: storedRoomId });
+  }
+});
 
 // ══════════════════════════════════════════════════
 // LANDING
 // ══════════════════════════════════════════════════
 function initLanding() {
+  const q = new URLSearchParams(window.location.search);
+  const prefillCode = q.get('room');
+  if (prefillCode) $('code-input').value = prefillCode.toUpperCase();
+
+  if (!S.sessionId) {
+    S.sessionId = getOrCreateSessionId();
+  }
+  const avatarInput = $('avatar-input');
+  const storedAvatar = localStorage.getItem('imposter.avatar');
+  if (storedAvatar && avatarInput) avatarInput.value = storedAvatar;
+
   $('create-btn').onclick = () => {
     const name = $('name-input').value.trim();
+    const avatar = $('avatar-input')?.value || '🦊';
     if (!name) { showErr('landing-error','Enter your name.'); return; }
     S.myName = name;
-    socket.emit('create-room', { name, avatar: 'auto' });
+    S.myAvatar = avatar;
+    localStorage.setItem('imposter.avatar', avatar);
+    socket.emit('create-room', { name, avatar, sessionId: S.sessionId });
   };
   $('join-btn').onclick = () => {
     const name = $('name-input').value.trim();
     const code = $('code-input').value.trim().toUpperCase();
+    const avatar = $('avatar-input')?.value || '🦊';
     if (!name) { showErr('landing-error','Enter your name.'); return; }
     if (!code) { showErr('landing-error','Enter a room code.'); return; }
     S.myName = name;
-    socket.emit('join-room', { roomId: code, name, avatar: 'auto' });
+    S.myAvatar = avatar;
+    localStorage.setItem('imposter.avatar', avatar);
+    socket.emit('join-room', { roomId: code, name, avatar, sessionId: S.sessionId });
   };
   $('code-input').onkeydown = e => { if (e.key==='Enter') $('join-btn').click(); };
   $('name-input').onkeydown = e => { if (e.key==='Enter') $('create-btn').click(); };
@@ -93,12 +138,27 @@ function renderLobby() {
   $('room-code-display').textContent = S.roomId;
   renderDurationCard();
   renderLobbyPlayers();
+  renderLatestRoundBoard();
   $('copy-btn').onclick = () => {
     copyText(S.roomId);
     $('copy-btn').textContent = '✓ Copied!';
     setTimeout(() => $('copy-btn').textContent = '📋 Copy', 2000);
   };
+  const inviteBase = S.inviteBaseUrl || window.location.origin;
+  const inviteLink = `${inviteBase}?room=${encodeURIComponent(S.roomId)}`;
+  $('invite-link').value = inviteLink;
+  $('invite-qr').src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(inviteLink)}`;
+  const copyLinkBtn = $('copy-link-btn');
+  if (copyLinkBtn) {
+    copyLinkBtn.onclick = () => {
+      copyText(inviteLink);
+      copyLinkBtn.textContent = 'Copied!';
+      setTimeout(() => { copyLinkBtn.textContent = 'Copy Link'; }, 1800);
+    };
+  }
   $('start-btn').onclick = () => socket.emit('start-game', { roomId: S.roomId });
+  const leaveLobbyBtn = $('leave-lobby-btn');
+  if (leaveLobbyBtn) leaveLobbyBtn.onclick = leaveRoom;
 
   // Host-only controls
   const hc = $('host-controls');
@@ -116,6 +176,32 @@ function renderLobby() {
   }
 
   updateStartBtn();
+}
+
+function renderLatestRoundBoard() {
+  const el = $('latest-round-board');
+  if (!el) return;
+  const has = Object.values(S.latestRoundScores).some(v => (v ?? 0) !== 0);
+  if (!has) {
+    el.style.display = 'none';
+    return;
+  }
+  const ranked = [...S.players].sort((a, b) =>
+    (S.latestRoundScores[b.socketId] ?? 0) - (S.latestRoundScores[a.socketId] ?? 0)
+  );
+  el.style.display = '';
+  el.innerHTML = `
+    <div class="sb-title">Latest Game Score</div>
+    <div class="sb-rows">
+      ${ranked.map((p) => {
+        const pts = S.latestRoundScores[p.socketId] ?? 0;
+        const isMe = p.socketId === S.mySocketId;
+        return `<div class="sb-row ${isMe ? 'sb-me' : ''}">
+          <span class="sb-name">${esc(p.name)}${isMe ? ' <span class="you-tag">You</span>' : ''}</span>
+          <span class="sb-score">${pts >= 0 ? `+${pts}` : pts} pts</span>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
 function renderDurationCard() {
@@ -144,13 +230,14 @@ function renderLobbyPlayers() {
       const sc = S.scores[p.socketId] ?? 0;
       return `
         <div class="player-row">
-          ${av(colorFor(i), p.name[0].toUpperCase(), 'sm')}
+          ${av(colorFor(i), p.avatar, p.name[0].toUpperCase(), 'sm')}
           <div class="player-info">
             <div class="player-name-row">
               ${esc(p.name)}
               ${isMe ? '<span class="you-tag">You</span>' : ''}
             </div>
             ${p.isHost ? '<span class="host-tag">👑 Host</span>' : ''}
+            ${p.disconnected ? '<span class="reconnect-tag">Reconnecting...</span>' : ''}
           </div>
           ${hasScores ? `<span class="score-chip">${sc} pt${sc!==1?'s':''}</span>` : ''}
         </div>`;
@@ -178,7 +265,7 @@ function renderLobbyPlayers() {
             const idx = S.players.findIndex(x => x.socketId === p.socketId);
             return `<div class="sb-row ${isMe ? 'sb-me' : ''}">
               <span class="sb-rank">${medal}</span>
-              ${av(colorFor(idx), p.name[0].toUpperCase(), 'sm')}
+              ${av(colorFor(idx), p.avatar, p.name[0].toUpperCase(), 'sm')}
               <span class="sb-name">${esc(p.name)}${isMe?' <span class="you-tag">You</span>':''}</span>
               <span class="sb-score">${sc} pts</span>
             </div>`;
@@ -220,10 +307,10 @@ window.doResetScores = function() {
 let flashTimer = null;
 function showWordFlash(word, role) {
   S.myWord = word; S.myRole = role;
-  // Role badge: same neutral styling for both crewmate and imposter
+  // Keep role hidden so everyone only sees a neutral prompt.
   const badge = $('role-badge');
   badge.className = 'role-badge neutral';
-  badge.textContent = role === 'imposter' ? '🎭 You are the Imposter' : '👤 You are a Crewmate';
+  badge.textContent = 'Memorize your secret word';
   // Word: same neutral styling for everyone — only the text differs
   const wordEl = $('flash-word');
   wordEl.textContent = word;
@@ -244,21 +331,50 @@ function showWordFlash(word, role) {
 // PLAYING
 // ══════════════════════════════════════════════════
 function renderPlaying() {
+  const leaveGameBtn = $('leave-game-btn');
+  if (leaveGameBtn) leaveGameBtn.onclick = leaveRoom;
+  const accuseBtn = $('accuse-btn');
+  if (accuseBtn) accuseBtn.onclick = openAccuseModal;
+  const closeAccuseBtn = $('close-accuse-btn');
+  if (closeAccuseBtn) closeAccuseBtn.onclick = closeAccuseModal;
+  const groupChatBtn = $('group-chat-btn');
+  if (groupChatBtn) groupChatBtn.onclick = openGroupChatModal;
+  const closeGroupChatBtn = $('close-group-chat-btn');
+  if (closeGroupChatBtn) closeGroupChatBtn.onclick = closeGroupChatModal;
+  const sendPersonalBtn = $('send-personal-chat-btn');
+  if (sendPersonalBtn) sendPersonalBtn.onclick = sendPersonalChat;
+  const personalInput = $('personal-chat-input');
+  if (personalInput) {
+    personalInput.onkeydown = e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPersonalChat(); }
+    };
+  }
   renderGameHeader();
   renderTimer();
   renderTurnBanner();
   renderChatInput();
   renderPlayerGrid();
+  renderExistingMessages();
+}
+
+function leaveRoom() {
+  if (!S.roomId) return;
+  socket.emit('leave-room', { roomId: S.roomId });
+  localStorage.removeItem('imposter.roomId');
+  S.roomId = null;
+  S.players = [];
+  S.messages = [];
+  showScreen('landing');
 }
 
 function renderGameHeader() {
   const p = me(); if (!p) return;
   const idx = S.players.findIndex(pl => pl.socketId === S.mySocketId);
-  const maxC = S.players.length === 4 ? 2 : 3;
+  const maxC = 1;
   $('hdr-code').textContent = '#' + S.roomId;
   $('hdr-chances').innerHTML = Array.from({length:maxC},(_,i)=>
     `<div class="cdot ${i<(p.chancesLeft??0)?'':'used'}"></div>`).join('');
-  $('hdr-me').innerHTML = `${av(colorFor(idx), p.name[0].toUpperCase(), 'sm')}
+  $('hdr-me').innerHTML = `${av(colorFor(idx), p.avatar, p.name[0].toUpperCase(), 'sm')}
     <span>${esc(p.name)}</span>
     ${p.isEliminated ? '<span class="badge badge-red" style="margin-left:6px">Out</span>' : ''}
     ${p.hasGuessedCorrectly ? '<span class="badge badge-green" style="margin-left:6px">Found ✓</span>' : ''}`;
@@ -287,6 +403,11 @@ function renderTurnBanner() {
     $('turn-text').innerHTML = '<strong>Your turn!</strong> Describe your word in chat.';
   } else {
     $('turn-text').innerHTML = `Waiting for <strong>${esc(S.currentTurnName??'…')}</strong> to describe…`;
+  }
+  const turnPill = $('turn-time-pill');
+  if (turnPill) {
+    turnPill.textContent = `${S.turnTimeRemaining}s`;
+    turnPill.className = 'badge ' + (S.turnTimeRemaining <= 10 ? 'badge-red' : 'badge-grey');
   }
 }
 
@@ -336,25 +457,82 @@ function addMessage(msg) {
   const row = document.createElement('div');
   row.className = 'msg-row ' + (isMine?'mine':'theirs');
   row.innerHTML = `
-    ${!isMine ? `<div class="msg-avatar">${av(col, msg.senderName[0].toUpperCase(),'sm')}</div>` : ''}
+    ${!isMine ? `<div class="msg-avatar">${av(col, msg.senderAvatar, msg.senderName[0].toUpperCase(),'sm')}</div>` : ''}
     <div class="msg-col">
       ${!isMine ? `<span class="msg-sender">${esc(msg.senderName)}</span>` : ''}
       <div class="msg-bubble">${esc(msg.text)}</div>
       <span class="msg-time">${time}</span>
     </div>
-    ${isMine ? `<div class="msg-avatar">${av(col, msg.senderName[0].toUpperCase(),'sm')}</div>` : ''}`;
+    ${isMine ? `<div class="msg-avatar">${av(col, msg.senderAvatar, msg.senderName[0].toUpperCase(),'sm')}</div>` : ''}`;
   feed.appendChild(row);
   feed.scrollTop = feed.scrollHeight;
+}
+
+function addPersonalMessage(msg) {
+  const feed = $('personal-chat-messages');
+  if (!feed) return;
+  const row = document.createElement('div');
+  row.className = 'msg-row theirs';
+  row.innerHTML = `
+    <div class="msg-avatar">${av('#7c3aed', msg.senderAvatar, msg.senderName[0].toUpperCase(),'sm')}</div>
+    <div class="msg-col">
+      <span class="msg-sender">${esc(msg.senderName)}</span>
+      <div class="msg-bubble">${esc(msg.text)}</div>
+    </div>`;
+  feed.appendChild(row);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function openGroupChatModal() {
+  const modal = $('group-chat-modal');
+  if (!modal) return;
+  const feed = $('personal-chat-messages');
+  if (feed) {
+    feed.innerHTML = '';
+    S.personalMessages.forEach(addPersonalMessage);
+  }
+  modal.style.display = 'flex';
+}
+function closeGroupChatModal() {
+  const modal = $('group-chat-modal');
+  if (modal) modal.style.display = 'none';
+}
+function sendPersonalChat() {
+  const input = $('personal-chat-input');
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  socket.emit('send-personal-chat', { roomId: S.roomId, text });
+  input.value = '';
+}
+
+function renderExistingMessages() {
+  const feed = $('chat-messages');
+  if (!feed) return;
+  if (!S.messages.length) return;
+  feed.innerHTML = '';
+  S.messages.forEach(addMessage);
 }
 
 // Player grid — ANY active player can accuse at any time (no turn lock)
 function renderPlayerGrid() {
   const grid = $('game-grid');
+  if (!grid) return;
+  grid.innerHTML = buildPlayerGridHtml();
+}
+
+function renderAccuseGrid() {
+  const grid = $('accuse-grid');
+  if (!grid) return;
+  grid.innerHTML = buildPlayerGridHtml();
+}
+
+function buildPlayerGridHtml() {
   const p = me();
   const canAccuse = !p?.isEliminated && !p?.hasGuessedCorrectly;
-  const maxC = S.players.length === 4 ? 2 : 3;
+  const maxC = 1;
 
-  grid.innerHTML = S.players.map((pl,i) => {
+  return S.players.map((pl,i) => {
     const isSelf = pl.socketId === S.mySocketId;
     const clickable = canAccuse && !pl.isEliminated;
     const isConf = S.confirming === pl.socketId;
@@ -362,6 +540,7 @@ function renderPlayerGrid() {
     const cls = ['pcard',
       clickable ? 'clickable' : '',
       pl.isEliminated ? 'elim' : '',
+      pl.disconnected ? 'disconnected' : '',
       (isSelf && pl.hasGuessedCorrectly) ? 'found' : '',
       isSelf ? 'self' : '',
     ].filter(Boolean).join(' ');
@@ -369,6 +548,8 @@ function renderPlayerGrid() {
     let status = '';
     if (pl.isEliminated) {
       status = '<span class="pstatus elim-txt">💀 Out</span>';
+    } else if (pl.disconnected) {
+      status = '<span class="pstatus" style="color:var(--yellow)">⏳ Reconnecting</span>';
     } else if (isSelf && pl.hasGuessedCorrectly) {
       status = '<span class="pstatus found-txt">✅ Found!</span>';
     } else {
@@ -383,12 +564,13 @@ function renderPlayerGrid() {
 
     return `
       <div class="${cls}" data-sid="${pl.socketId}" onclick="onCard(event,this)">
-        ${av(colorFor(i), pl.name[0].toUpperCase(), 'lg')}
+          ${av(colorFor(i), pl.avatar, pl.name[0].toUpperCase(), 'lg')}
         <div class="pname">
           ${esc(pl.name)}
           ${isSelf?'<span class="you-tag" style="font-size:.6rem">You</span>':''}
           ${pl.isHost?'👑':''}
         </div>
+        <div style="font-size:.62rem;color:var(--muted);font-family:monospace">${esc(pl.socketId.slice(0, 6))}</div>
         ${status}
         ${isConf ? `
           <div class="confirm-overlay">
@@ -400,6 +582,19 @@ function renderPlayerGrid() {
           </div>` : ''}
       </div>`;
   }).join('');
+}
+
+function openAccuseModal() {
+  const modal = $('accuse-modal');
+  if (!modal) return;
+  renderAccuseGrid();
+  modal.style.display = 'flex';
+}
+
+function closeAccuseModal() {
+  const modal = $('accuse-modal');
+  if (!modal) return;
+  modal.style.display = 'none';
 }
 
 window.onCard = function(e, card) {
@@ -414,10 +609,12 @@ window.onCard = function(e, card) {
 window.doAccuse = function(e, sid) {
   e.stopPropagation(); S.confirming = null;
   socket.emit('submit-guess', { roomId: S.roomId, guessedSocketId: sid });
+  closeAccuseModal();
   renderPlayerGrid();
 };
 window.cancelAccuse = function(e) {
   e.stopPropagation(); S.confirming = null; renderPlayerGrid();
+  renderAccuseGrid();
 };
 
 function showGuessToast(result) {
@@ -447,11 +644,13 @@ function renderRoundOver(data) {
   // Update persistent score cache from this round's data
   data.players.forEach(p => {
     S.scores[p.socketId] = p.score ?? 0;
+    S.latestRoundScores[p.socketId] = p.latestRoundScore ?? 0;
   });
 
   const myP = data.players.find(p => p.socketId === S.mySocketId);
   const WHY = {
     'timer':'⏰ Time ran out!', 'all-crewmates-done':'🏁 All players have guessed.',
+    'all-crewmates-found-imposter':'🎯 All crewmates found the imposter!',
     'imposter-self-identified':'🎭 The Imposter revealed themselves!',
     'imposter-disconnected':'🔌 Imposter disconnected.',
   };
@@ -489,11 +688,10 @@ function renderRoundOver(data) {
     const medal = rank===0?'🥇':rank===1?'🥈':rank===2?'🥉':'';
     return `<div class="ro-pcard ${isImp?'is-imp':''}">
       <span style="font-size:1.3rem;width:24px;text-align:center">${medal}</span>
-      ${av(colorFor(idx >= 0 ? idx : rank), p.name[0].toUpperCase())}
+      ${av(colorFor(idx >= 0 ? idx : rank), p.avatar, p.name[0].toUpperCase())}
       <div class="ro-pinfo">
         <div class="ro-pname">${esc(p.name)}${isMe?'<span class="you-tag">You</span>':''}${isImp?'🎭':''}</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px">
-          <span class="ro-prole ${isImp?'imp':'crew'}">${isImp?'Imposter':'Crewmate'}</span>
           <span class="ro-chip ${CHIP[p.result]||'loss'}">${CLBL[p.result]||'❌'} ${PTS[p.result]||'+0'}</span>
         </div>
         <div class="ro-pword">"${esc(p.word)}"</div>
@@ -531,16 +729,38 @@ function setPlayers(players, host) {
 
 socket.on('room-created', d => {
   S.roomId = d.roomId; S.isHost = true; S.roundDuration = d.roundDuration ?? 300;
-  setPlayers(d.players, d.host); showScreen('lobby'); renderLobby();
+  S.inviteBaseUrl = d.inviteBaseUrl || '';
+  localStorage.setItem('imposter.roomId', S.roomId);
+  setPlayers(d.players, d.host);
+  d.players.forEach(p => { S.latestRoundScores[p.socketId] = p.latestRoundScore ?? 0; });
+  showScreen('lobby'); renderLobby();
 });
 socket.on('room-joined', d => {
   S.roomId = d.roomId; S.isHost = false; S.roundDuration = d.roundDuration ?? 300;
-  setPlayers(d.players, d.host); showScreen('lobby'); renderLobby();
+  S.inviteBaseUrl = d.inviteBaseUrl || '';
+  S.timeRemaining = d.timeRemaining ?? S.roundDuration;
+  S.currentTurnSocketId = d.currentTurnSocketId ?? null;
+  S.currentTurnName = d.currentTurnName ?? null;
+  S.turnTimeRemaining = d.turnTimeRemaining ?? 45;
+  S.turnDuration = d.turnDuration ?? 45;
+  S.messages = Array.isArray(d.messages) ? d.messages : [];
+  S.personalMessages = Array.isArray(d.personalMessages) ? d.personalMessages : [];
+  localStorage.setItem('imposter.roomId', S.roomId);
+  setPlayers(d.players, d.host);
+  d.players.forEach(p => { S.latestRoundScores[p.socketId] = p.latestRoundScore ?? 0; });
+  if (d.phase === 'playing') {
+    showScreen('playing');
+    renderPlaying();
+  } else {
+    showScreen('lobby');
+    renderLobby();
+  }
 });
 socket.on('join-error',  ({message}) => showErr('landing-error', message));
 socket.on('start-error', ({message}) => showErr('lobby-error', message));
 socket.on('guess-error', ({message}) => showErr('chat-error', message));
 socket.on('message-rejected', ({reason}) => showErr('chat-error', reason));
+socket.on('connect_error', () => showErr('landing-error', 'Unable to connect to server. Check Wi-Fi/network.'));
 
 socket.on('player-joined', ({players}) => {
   setPlayers(players, null); renderLobbyPlayers(); updateStartBtn();
@@ -568,6 +788,9 @@ socket.on('timer-tick', ({timeRemaining}) => { S.timeRemaining = timeRemaining; 
 
 socket.on('players-updated', ({players}) => {
   setPlayers(players, null); renderGameHeader(); renderPlayerGrid();
+  renderAccuseGrid();
+  players.forEach(p => { S.latestRoundScores[p.socketId] = p.latestRoundScore ?? 0; });
+  renderLatestRoundBoard();
 });
 socket.on('new-message', msg => { S.messages.push(msg); addMessage(msg); });
 
@@ -575,6 +798,24 @@ socket.on('turn-changed', ({currentTurnSocketId, currentTurnName}) => {
   S.currentTurnSocketId = currentTurnSocketId;
   S.currentTurnName = currentTurnName;
   renderTurnBanner(); renderChatInput(); renderPlayerGrid();
+  renderAccuseGrid();
+});
+
+socket.on('turn-tick', ({ turnTimeRemaining, turnDuration }) => {
+  S.turnTimeRemaining = turnTimeRemaining;
+  S.turnDuration = turnDuration;
+  renderTurnBanner();
+});
+
+socket.on('turn-timed-out', ({ timedOutName }) => {
+  if (!timedOutName) return;
+  showErr('chat-error', `⏱️ ${timedOutName} ran out of turn time. Turn skipped.`, 2500);
+});
+
+socket.on('player-eliminated', ({ socketId }) => {
+  S.players = S.players.map(p => p.socketId === socketId ? { ...p, isEliminated: true, chancesLeft: 0 } : p);
+  renderGameHeader();
+  renderPlayerGrid();
 });
 
 socket.on('guess-result', result => {
@@ -585,17 +826,69 @@ socket.on('guess-result', result => {
     hasGuessedCorrectly: result.correct ? true : p.hasGuessedCorrectly,
   });
   showGuessToast(result);
-  renderGameHeader(); renderPlayerGrid(); renderTurnBanner(); renderChatInput();
+  renderGameHeader(); renderPlayerGrid(); renderAccuseGrid(); renderTurnBanner(); renderChatInput();
 });
 
 socket.on('round-over', renderRoundOver);
+socket.on('new-personal-chat', msg => {
+  S.personalMessages.push(msg);
+  addPersonalMessage(msg);
+});
+socket.on('personal-chat-cleared', () => {
+  S.personalMessages = [];
+  const feed = $('personal-chat-messages');
+  if (feed) feed.innerHTML = '';
+  const input = $('personal-chat-input');
+  if (input) input.value = '';
+});
 
 socket.on('rematch-started', ({players, host, roundDuration}) => {
   S.roundDuration = roundDuration;
   S.isHost = host === S.mySocketId;
   setPlayers(players, host);
-  S.messages = []; S.myWord = null; S.myRole = null; S.currentTurnSocketId = null;
+  players.forEach(p => { S.latestRoundScores[p.socketId] = p.latestRoundScore ?? 0; });
+  S.messages = []; S.personalMessages = []; S.myWord = null; S.myRole = null; S.currentTurnSocketId = null;
+  S.turnTimeRemaining = S.turnDuration;
   showScreen('lobby'); renderLobby();
+});
+
+socket.on('reconnected', d => {
+  S.roomId = d.roomId;
+  S.isHost = d.host === S.mySocketId;
+  S.roundDuration = d.roundDuration ?? 300;
+  S.inviteBaseUrl = d.inviteBaseUrl || '';
+  S.timeRemaining = d.timeRemaining ?? S.roundDuration;
+  S.currentTurnSocketId = d.currentTurnSocketId ?? null;
+  S.currentTurnName = d.currentTurnName ?? null;
+  S.turnTimeRemaining = d.turnTimeRemaining ?? 45;
+  S.turnDuration = d.turnDuration ?? 45;
+  S.myWord = d.word ?? null;
+  S.myRole = d.role ?? null;
+  S.messages = Array.isArray(d.messages) ? d.messages : [];
+  S.personalMessages = Array.isArray(d.personalMessages) ? d.personalMessages : [];
+  setPlayers(d.players, d.host);
+  d.players.forEach(p => { S.latestRoundScores[p.socketId] = p.latestRoundScore ?? 0; });
+  localStorage.setItem('imposter.roomId', S.roomId);
+
+  if (d.phase === 'lobby') {
+    showScreen('lobby');
+    renderLobby();
+    return;
+  }
+  if (d.phase === 'word-flash' && d.word) {
+    showScreen('wordflash');
+    showWordFlash(d.word, d.role);
+    return;
+  }
+  if (d.phase === 'playing') {
+    showScreen('playing');
+    renderPlaying();
+    return;
+  }
+  if (d.phase === 'round-over') {
+    showScreen('lobby');
+    renderLobby();
+  }
 });
 
 // ── New feature socket events ──────────────────────────────────────────────
